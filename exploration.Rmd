@@ -3,10 +3,10 @@ title: "Quora Question Pairs"
 output: html_notebook
 ---
 
-Load packages:
-
 ```{r}
+# Load packages and read the training data into R
 library(dplyr)
+library(ggplot2)
 train <- read.csv("train.csv", stringsAsFactors = F)
 ```
 
@@ -15,6 +15,26 @@ glimpse(train)
 ```
 
 ```{r}
+# Take a look at the questions
 head(train[c("question1","question2")])
+```
+
+```{r}
+# Proportion of data that is duplicates vs not
+table(train$is_duplicate) / nrow(train)
+```
+
+Get a histogram of question length differences:
+```{r}
+train$charDiff <- nchar(train$question1) - nchar(train$question2)
+
+h <- ggplot(data=train, aes(x=charDiff))
+h + geom_histogram(aes(fill = as.character(train$is_duplicate)))
+```
+
+```{r}
+plotStage <- train %>% filter(charDiff > -200 & charDiff < 200)
+h <- ggplot(data=plotStage, aes(x=charDiff))
+h + geom_histogram(aes(fill = as.character(plotStage$is_duplicate)))
 ```
 
