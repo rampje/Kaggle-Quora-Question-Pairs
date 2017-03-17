@@ -1,0 +1,20 @@
+---
+title: "Quora Question Pairs"
+output: html_notebook
+---
+
+Load packages:
+
+```{r}
+library(dplyr)
+train <- read.csv("train.csv", stringsAsFactors = F)
+```
+
+```{r}
+glimpse(train)
+```
+
+```{r}
+head(train[c("question1","question2")])
+```
+
