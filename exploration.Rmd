@@ -5,8 +5,10 @@ output: html_notebook
 
 ```{r}
 # Load packages and read the training data into R
-library(dplyr)
-library(ggplot2)
+library(tidyverse)
+library(purrr)
+library(tm)
+library(lsa)
 train <- read.csv("train.csv", stringsAsFactors = F)
 ```
 
@@ -36,5 +38,42 @@ h + geom_histogram(aes(fill = as.character(train$is_duplicate)))
 plotStage <- train %>% filter(charDiff > -200 & charDiff < 200)
 h <- ggplot(data=plotStage, aes(x=charDiff))
 h + geom_histogram(aes(fill = as.character(plotStage$is_duplicate)))
+```
+
+Get cosine similarities. Need to transform data 
+
+```{r}
+train$question1 <- tolower(train$question1)
+train$question2 <- tolower(train$question2)
+
+q1 <- strsplit(train$question1, " ")
+q2 <- strsplit(train$question2, " ")
+```
+
+```{r}
+shell <- union(q1, q2)
+shell <- map(shell,tm::removePunctuation)
+shell <- map(shell, unique)
+shell <- map(shell, data.frame)
+shell <- map(shell, function(x) setNames(x, "Var1"))
+```
+
+```{r}
+q1t <- map(q1, tm::removePunctuation)
+q1t <- map(q1t, table)
+q1t <- map(q1t, data.frame)
+```
+
+```{r}
+q2t <- map(q2, table)
+q2t <- map(q2t, table)
+q2t <- map(q2t, data.frame)
+```
+
+```{r}
+# initialize list 
+staging <- vector("list", length(shell))
+for(x in 1:length(shell)){
+  staging[[x]] <- full_join(shell[[x]], q1t[[x]])}
 ```
 
