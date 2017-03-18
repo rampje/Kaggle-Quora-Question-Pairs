@@ -3,44 +3,96 @@ title: "Quora Question Pairs"
 output: html_notebook
 ---
 
+This is an R Markdown notebook containing exploratory data analysis (EDA), text mining, and modeling for Kaggle's [Quora Question Pairs](https://www.kaggle.com/c/quora-question-pairs) competition. The goal is to build a model that can accurately classify whether  questions are duplicates. Updated source code available on [Github](https://github.com/rampje/Kaggle-Quora-Question-Pairs/blob/master/exploration.Rmd)
+
 ```{r}
 # Load packages and read the training data into R
 library(tidyverse)
 library(purrr)
 library(tm)
 library(lsa)
+library(h2o)
 train <- read.csv("train.csv", stringsAsFactors = F)
 ```
 
+Click to hide functions used in script:
+
+```{r}
+# Text processing pipeline where input x is either question1 or question2
+txt_proc_pipeline <- function(x){
+  x %>% 
+    tolower %>% 
+    strsplit(" ") %>%
+    map(tm::removePunctuation)}
+
+# Wrapper function to calculate cosine similarity between two question columns
+# This is applied to the test data set after being explicitly laid out for the training data set
+cosine_similarity <- function(x, y){
+  # apply text processing pipeline to inputs
+  x <- txt_proc_pipeline(x)
+  y <- txt_proc_pipeline(y)
+  
+  # create list containing vectors of union sets between x and y
+  union_set <- Map(c, x, y)
+  union_set <- map(union_set, unique)
+  
+  # initialize empty lists to contain basis vectors for questions as well as vector of cosine similarities
+  x_stage <- vector("list", length(union_set))
+  y_stage <- vector("list", length(union_set))
+  cosine_sims <- numeric()
+  # populate lists containing basis vectors for questions as well as vector of cosine similarities
+  for(i in seq_along(union_set)){
+    x_stage[[i]] <- is.element(union_set[[i]], x[[i]])
+    y_stage[[i]] <- is.element(union_set[[i]], y[[i]])
+    
+    sim <- as.numeric(lsa::cosine(x_stage[[i]],
+                                  y_stage[[i]]))
+    cosine_sims <- c(cosine_sims, sim)}
+  
+  cosine_sims}
+```
+
+Take a look at the training data set
 ```{r}
 glimpse(train)
 ```
 
+What do the question pairs look like?
 ```{r}
-# Take a look at the questions
-head(train[c("question1","question2")])
-```
-
-```{r}
-# Proportion of data that is duplicates vs not
-table(train$is_duplicate) / nrow(train)
+head(train[c("question1","question2","is_duplicate")], 10)
 ```
 
 Get a histogram of question length differences:
 ```{r}
-train$charDiff <- nchar(train$question1) - nchar(train$question2)
-
-h <- ggplot(data=train, aes(x=charDiff))
-h + geom_histogram(aes(fill = as.character(train$is_duplicate)))
+train$char_diff <- nchar(train$question1) - nchar(train$question2)
 ```
 
 ```{r}
-plotStage <- train %>% filter(charDiff > -200 & charDiff < 200)
-h <- ggplot(data=plotStage, aes(x=charDiff))
-h + geom_histogram(aes(fill = as.character(plotStage$is_duplicate)))
+plotStage <- train %>% filter(char_diff > -200 & char_diff < 200)
+h <- ggplot(data=plotStage, aes(x=char_diff))
+h + geom_histogram(aes(fill = as.character(plotStage$is_duplicate)),
+                   binwidth = 5, colour = "black")
 ```
 
-Get cosine similarities. Need to transform data 
+## Calculating cosine similarities 
+
+### Definition of cosine similarity
+
+The cosine similarity of two vectors **a** and **b** is an idea related to the [dot product](https://en.wikipedia.org/wiki/Euclidean_vector#Dot_product), defined as:
+
+$$\vec{a}\cdot \vec{b} = \sum_{i=1}^{n}a_{i}b_{i}$$
+
+The dot product is a single scalar value resulting summing all the elements of **a** and **b** multiplied together. The cosine similarity can be derived by rewriting the dot product formula:
+
+$$\vec{a}\cdot \vec{b} = \left \| \vec{a} \right \|  \left \| \vec{b} \right \| cos(\Theta)$$
+
+$$ similarity = cos(\Theta) = \frac{\vec{a}\cdot \vec{b}}{\left \| \vec{a} \right \|  \left \| \vec{b} \right \|} $$
+
+Similarity takes a value between 0 and 1.
+
+
+
+### Transforming data
 
 ```{r}
 train$question1 <- tolower(train$question1)
@@ -48,32 +100,144 @@ train$question2 <- tolower(train$question2)
 
 q1 <- strsplit(train$question1, " ")
 q2 <- strsplit(train$question2, " ")
+
+q1 <- map(q1, tm::removePunctuation)
+q2 <- map(q2, tm::removePunctuation)
+q1[[1]] # example
 ```
 
+Set up the lists of vectors that will be inputed into cosine()
+
 ```{r}
-shell <- union(q1, q2)
-shell <- map(shell,tm::removePunctuation)
+shell <- Map(c, q1, q2)
 shell <- map(shell, unique)
-shell <- map(shell, data.frame)
-shell <- map(shell, function(x) setNames(x, "Var1"))
+shell[[1]]
 ```
 
+In order to create the question vectors, 2 lists need to be initialized. These lists are then populated in a for loop with logical vectors indicating set membership of words that appear in the union of question 1 and question 2 words.
 ```{r}
-q1t <- map(q1, tm::removePunctuation)
-q1t <- map(q1t, table)
-q1t <- map(q1t, data.frame)
-```
-
-```{r}
-q2t <- map(q2, table)
-q2t <- map(q2t, table)
-q2t <- map(q2t, data.frame)
-```
-
-```{r}
-# initialize list 
-staging <- vector("list", length(shell))
+stage1 <- vector("list", length(shell))
+stage2 <- vector("list", length(shell))
 for(x in 1:length(shell)){
-  staging[[x]] <- full_join(shell[[x]], q1t[[x]])}
+  stage1[[x]] <- is.element(shell[[x]], q1[[x]])
+  stage2[[x]] <- is.element(shell[[x]], q2[[x]])}
+
+# a sample of both vectors
+data.frame("q1"=as.numeric(stage1[[21]]), "q2"=as.numeric(stage2[[21]]), "word"=shell[[21]])
+```
+
+Build vector containing cosine similarities using a for loop. This took about 5-6 minutes to run
+
+```{r}
+cos_sims <- numeric()
+for(x in 1:length(shell)){
+  sim <- as.numeric(lsa::cosine(stage1[[x]], stage2[[x]]))
+  cos_sims <- c(cos_sims, sim)}
+head(cos_sims, 50)
+```
+
+Distribution of question pairs' cosine similarities 
+```{r}
+train$cos_sims <- cos_sims
+h <- ggplot(data=train, aes(x=cos.sims))
+h + geom_histogram(aes(fill = as.character(train$is_duplicate)),
+                   binwidth = 0.01, colour = "black")
+```
+
+
+```{r}
+s <- ggplot(data = train, aes(char_diff, cos_sims))
+s + geom_point(aes(colour = factor(is_duplicate)),
+               alpha = 0.2)
+```
+
+Add a few more features 
+
+```{r}
+train$q1_wc <- map_dbl(q1, length)
+train$q2_wc <- map_dbl(q2, length)
+train$wc_diff <- train$q1 - train$q2
+
+# also make this a factor now to avoid problems modeling later
+train$is_duplicate <- as.factor(train$is_duplicate)
+
+glimpse(train)
+```
+
+```{r}
+plotStage <- train %>% filter(wc_diff > -30 & wc_diff < 30)
+h <- ggplot(data=plotStage, aes(x=wc_diff))
+h + geom_histogram(aes(fill = as.character(plotStage$is_duplicate)),
+                   binwidth=1, colour = "black")
+```
+
+
+Investigating question ID duplicates
+
+```{r}
+# question1 ids that appear most frequently
+head(sort(table(train$qid1), decreasing = T))
+```
+
+```{r}
+head(train[train$qid1==8461,], 10)
+```
+
+## Fit Some Models
+
+Use h2o to fit for boosted models
+```{r}
+h2o.init(nthreads = -1)
+```
+
+Create h2o train dataframe with response and predictors
+```{r}
+gbm_predictors <- c("char_diff","cos_sims","q1_wc","q2_wc")
+
+train$is_duplicate <- as.factor(train$is_duplicate)
+h2o_train1 <- as.h2o(train[c("is_duplicate",gbm_predictors)], 
+                    destination.frame = "")
+```
+
+fit generalized boosted regression predicting binary target
+```{r}
+gbm1 <- h2o.gbm(x = gbm_predictors,
+                y = "is_duplicate",
+                training_frame = h2o_train1,
+                distribution = "bernoulli",
+                model_id = "gbm1",
+                ntrees = 100,
+                learn_rate = 0.01,
+                max_depth = 10,
+                stopping_metric = "logloss",
+                stopping_tolerance = 0,
+                seed = 321)
+```
+
+Model summary
+```{r}
+gbm1
+```
+
+### Prepare test data set for modeling
+```{r}
+test <- read.csv("test.csv", stringsAsFactors = F)
+
+test$char_diff <- nchar(test$question1) - nchar(test$question2)
+test$q1_wc <- test$question1 %>% 
+                      txt_proc_pipeline %>%
+                      map_dbl(length)
+test$q2_wc <- test$question2 %>% 
+                      txt_proc_pipeline %>%
+                      map_dbl(length)
+glimpse(test)
+```
+
+
+```{r}
+t1 <- Sys.time()
+test$cos_sims <- cosine_similarity(test$question1, test$question2)
+t2 <- Sys.time()
+t2-t1
 ```
 
