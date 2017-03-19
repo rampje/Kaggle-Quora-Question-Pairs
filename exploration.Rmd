@@ -76,11 +76,15 @@ h + geom_histogram(aes(fill = as.character(plotStage$is_duplicate)),
                    binwidth = 5, colour = "black")
 ```
   
+
+
 ## Calculating cosine similarities   
+
+This blog [post](http://blog.christianperone.com/2011/09/machine-learning-text-feature-extraction-tf-idf-part-i/) provides an introduction to [**term frequency-inverse document frequency** (**tf-idf**)](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) and the [**Vector Space Model** (**VSM**)](https://en.wikipedia.org/wiki/Vector_space_model). These concepts provide the mathematical foundations which motivate using cosine similarity to determine whether texts are the same.
 
 #### Definition of cosine similarity  
 
-The cosine similarity of two vectors **a** and **b** is an idea related to the [dot product](https://en.wikipedia.org/wiki/Dot_product), defined as:
+The [cosine similarity](http://blog.christianperone.com/2013/09/machine-learning-cosine-similarity-for-vector-space-models-part-iii/) of two vectors **a** and **b** is an idea related to the [dot product](https://en.wikipedia.org/wiki/Dot_product), defined as:
 
 $$\vec{a}\cdot \vec{b} = \sum_{i=1}^{n}a_{i}b_{i}$$
 
@@ -91,9 +95,6 @@ $$\vec{a}\cdot \vec{b} = \left \| \vec{a} \right \|  \left \| \vec{b} \right \| 
 $$ similarity = cos(\Theta) = \frac{\vec{a}\cdot \vec{b}}{\left \| \vec{a} \right \|  \left \| \vec{b} \right \|} $$
 
 Similarity takes a value between 0 and 1.
-
-
-
 
 
 #### Transforming data
@@ -195,6 +196,7 @@ test$q2_wc <- test$question2 %>%
 glimpse(test)
 ```
 
+May have to figure out a faster way to implement this...
 
 ```{r}
 t1 <- Sys.time()
@@ -212,6 +214,7 @@ Using *caret* package's extreme gradient (XG) Boosted trees method.
 
 Fit boosted trees predicting binary target
 ```{r}
+# go to dataframe with response and predictors for tree model
 bt_df1 <- train[c("is_duplicate","char_diff","cos_sims","q1_wc","q2_wc")]
 
 set.seed(1) 
