@@ -12,6 +12,7 @@ library(purrr)
 library(tm)
 library(lsa)
 library(caret)
+library(reshape2)
 ```
 
 ```{r}
@@ -181,13 +182,60 @@ h + geom_histogram(aes(fill = as.character(plotStage$is_duplicate)),
                    binwidth=1, colour = "black")
 ```
 
+### Highest occurence words
+
+There are some terms that may be worth tagging
+```{r}
+train_words <- train[c("id","question1","question2")]
+train_words <- melt(train_words, id.vars = "id")
+train_words <- txt_proc_pipeline(train_words$value)
+train_words <- unlist(train_words)
+train_words <- tm::removeWords(train_words, stopwords("english"))
+head(sort(table(train_words), decreasing=T), 100)
+```
+
+Word occurence features found from looking at *train_words*.
+
+```{r}
+word_occurences <- c("life","money","indian","trump","2016","engineering","donald","google","facebook","language","sex", "war", "programming", "president", "women","android","iphone","clinton","hillary")
+word_occurences
+```
+
+Get word occurence flags in a list
+```{r}
+word_flags <- vector("list", length(word_occurences))
+
+for(x in seq_along(word_occurences)){
+  word_flags[[x]] <- grepl(word_occurences[x], train$question1) &
+    grepl(word_occurences[x], train$question2)
+}
+```
+
+```{r}
+head(summary(word_flags))
+```
+
+```{r}
+word_flags <- data.frame(word_flags)
+names(word_flags) <- word_occurences
+word_flags$id <- train$id
+head(word_flags, 10)
+```
+
+```{r}
+train <- full_join(train, word_flags, by = "id")
+glimpse(train)
+```
+
 
 ### Fit Some Models
 
-#### Prepare test data set for modeling
 ```{r}
 test <- read.csv("test.csv", stringsAsFactors = F)
+```
 
+#### Prepare test data set for modeling
+```{r}
 test$char_diff <- nchar(test$question1) - nchar(test$question2)
 test$q1_wc <- test$question1 %>% 
                       txt_proc_pipeline %>%
@@ -195,8 +243,24 @@ test$q1_wc <- test$question1 %>%
 test$q2_wc <- test$question2 %>% 
                       txt_proc_pipeline %>%
                       map_dbl(length)
+```
+
+```{r}
+test_word_flags <- vector("list", length(word_occurences))
+
+for(x in seq_along(word_occurences)){
+  test_word_flags[[x]] <- grepl(word_occurences[x], test$question1) &
+    grepl(word_occurences[x], test$question2)}
+
+test_word_flags <- data.frame(test_word_flags)
+names(test_word_flags) <- word_occurences
+test_word_flags$test_id <- test$test_id
+
+test <- full_join(test, test_word_flags)
+
 glimpse(test)
 ```
+
 
 May have to figure out a faster way to implement this...
 
@@ -208,7 +272,18 @@ t2-t1
 ```
 
 ```{r}
+cos_sims_csv <- read.csv("cos_sims_v1.csv")
+test$cos_sims <- cos_sims_csv$x
+
+```
+
+```{r}
 test$cos_sims <- test_cos_sims
+```
+
+#### These are the records that got NA for cosine similarity calculation
+```{r}
+test %>% filter(is.na(cos_sims))
 ```
 
 
@@ -222,51 +297,55 @@ Using *caret* package's extreme gradient (XG) Boosted trees method.
 Fit boosted trees predicting binary target
 ```{r}
 # go to dataframe with response and predictors for tree model
-bt_df1 <- train[c("is_duplicate","char_diff","cos_sims","q1_wc","q2_wc")]
+bt_df2 <- train[c("is_duplicate","char_diff","cos_sims","q1_wc","q2_wc",word_occurences)]
 
 set.seed(1) 
 
 # tuning parameters
 gbmGrid <- expand.grid(
   nrounds = 10, # number of boosting iterations
-  max_depth = 1000, # max tree depth 
-  eta = 0.3, # shrinkage / learning rate
+  max_depth = 3000, # max tree depth 
+  eta = 0.01, # shrinkage / learning rate
   gamma = 0, # minimum loss function
   colsample_bytree = 1, # subsample of ratio of columns
   min_child_weight=1, # minimum sum of instance weight
   subsample = 0.5 # subsample shrinkage
   )
 
-gbmTree1 <- train(is_duplicate ~ ., 
-                 data = bt_df1,
+gbmTree2 <- train(is_duplicate ~ ., 
+                 data = bt_df2,
                  method = "xgbTree",
                 # trControl = fitControl,
                  verbose = FALSE,
                  na.action = na.omit,
                  tuneGrid = gbmGrid)
 ```
-2:19
-Model summary
+
+#### Model summary
 ```{r}
-gbmTree1
+gbmTree2
 ```
 
 Predict testing data
+
 ```{r}
-gbt1_preds <- predict(gbmTree1 , newdata = na.omit(test), type = "prob")
-gbt1_preds$test_id <- na.omit(test)$test_id
-head(gbt1_preds)
+# replace na similarity calculations for predictions to work
+test$cos_sims[is.na(test$cos_sims)] <- 1
+
+gbt2_preds <- predict(gbmTree2 , newdata = test, type = "prob")
+gbt2_preds$test_id <- test$test_id
+head(gbt2_preds)
 ```
 
 Prepare submission format
 
 ```{r}
-submission1 <- gbt1_preds[c("test_id","1")]
-names(submission1)[2] <- "is_duplicate"
-head(submission1)
+submission2 <- gbt2_preds[c("test_id","1")]
+names(submission2)[2] <- "is_duplicate"
+head(submission2)
 ```
 
 ```{r}
-write.csv(submission1, "submission1.csv", row.names = FALSE)
+write.csv(submission2, "submission2.csv", row.names = FALSE)
 ```
 
