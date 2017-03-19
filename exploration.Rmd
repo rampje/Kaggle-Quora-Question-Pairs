@@ -304,8 +304,8 @@ set.seed(1)
 # tuning parameters
 gbmGrid <- expand.grid(
   nrounds = 10, # number of boosting iterations
-  max_depth = 1000, # max tree depth 
-  eta = 0.3, # shrinkage / learning rate
+  max_depth = 3000, # max tree depth 
+  eta = 0.01, # shrinkage / learning rate
   gamma = 0, # minimum loss function
   colsample_bytree = 1, # subsample of ratio of columns
   min_child_weight=1, # minimum sum of instance weight
