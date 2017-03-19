@@ -12,6 +12,7 @@ library(purrr)
 library(tm)
 library(lsa)
 library(caret)
+library(xgboost)
 library(reshape2)
 ```
 
@@ -27,8 +28,10 @@ Click to hide functions used in script:
 txt_proc_pipeline <- function(x){
   x %>% 
     tolower %>% 
+    tm::removeWords(stopwords("english")) %>%
     strsplit(" ") %>%
     map(tm::removePunctuation)}
+    
 
 # Wrapper function to calculate cosine similarity between two question columns
 # This is applied to the test data set after being explicitly laid out for the training data set
@@ -266,19 +269,18 @@ May have to figure out a faster way to implement this...
 
 ```{r}
 t1 <- Sys.time()
-test_cos_sims <- cosine_similarity(test$question1, test$question2)
+test_cos_sims2 <- cosine_similarity(test$question1, test$question2)
 t2 <- Sys.time()
 t2-t1
 ```
 
 ```{r}
-cos_sims_csv <- read.csv("cos_sims_v1.csv")
+cos_sims_csv <- read.csv("cos_sims_v2.csv")
 test$cos_sims <- cos_sims_csv$x
-
 ```
 
 ```{r}
-test$cos_sims <- test_cos_sims
+test$cos_sims <- test_cos_sims2
 ```
 
 #### These are the records that got NA for cosine similarity calculation
@@ -304,8 +306,8 @@ set.seed(1)
 # tuning parameters
 gbmGrid <- expand.grid(
   nrounds = 10, # number of boosting iterations
-  max_depth = 1000, # max tree depth 
-  eta = 0.3, # shrinkage / learning rate
+  max_depth = 3000, # max tree depth 
+  eta = 0.01, # shrinkage / learning rate
   gamma = 0, # minimum loss function
   colsample_bytree = 1, # subsample of ratio of columns
   min_child_weight=1, # minimum sum of instance weight
