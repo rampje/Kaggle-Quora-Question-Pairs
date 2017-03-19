@@ -7,11 +7,13 @@ This is an R Markdown notebook containing exploratory data analysis (EDA), text 
 
 ```{r}
 # Load packages and read the training data into R
+library(plyr)
 library(tidyverse)
 library(purrr)
 library(tm)
 library(lsa)
-library(h2o)
+library(caret)
+
 train <- read.csv("train.csv", stringsAsFactors = F)
 ```
 
@@ -73,12 +75,12 @@ h <- ggplot(data=plotStage, aes(x=char_diff))
 h + geom_histogram(aes(fill = as.character(plotStage$is_duplicate)),
                    binwidth = 5, colour = "black")
 ```
+  
+## Calculating cosine similarities   
 
-## Calculating cosine similarities 
+#### Definition of cosine similarity  
 
-### Definition of cosine similarity
-
-The cosine similarity of two vectors **a** and **b** is an idea related to the [dot product](https://en.wikipedia.org/wiki/Euclidean_vector#Dot_product), defined as:
+The cosine similarity of two vectors **a** and **b** is an idea related to the [dot product](https://en.wikipedia.org/wiki/Dot_product), defined as:
 
 $$\vec{a}\cdot \vec{b} = \sum_{i=1}^{n}a_{i}b_{i}$$
 
@@ -92,15 +94,20 @@ Similarity takes a value between 0 and 1.
 
 
 
-### Transforming data
 
+
+#### Transforming data
+Question columns need to be transformed in order to calculate cosine similarity
 ```{r}
+# make words lowercase
 train$question1 <- tolower(train$question1)
 train$question2 <- tolower(train$question2)
 
+# turn vectors of questions into list containing vectors of question words
 q1 <- strsplit(train$question1, " ")
 q2 <- strsplit(train$question2, " ")
 
+# remove punctuation
 q1 <- map(q1, tm::removePunctuation)
 q2 <- map(q2, tm::removePunctuation)
 q1[[1]] # example
@@ -133,7 +140,7 @@ cos_sims <- numeric()
 for(x in 1:length(shell)){
   sim <- as.numeric(lsa::cosine(stage1[[x]], stage2[[x]]))
   cos_sims <- c(cos_sims, sim)}
-head(cos_sims, 50)
+head(cos_sims, 20)
 ```
 
 Distribution of question pairs' cosine similarities 
@@ -172,54 +179,9 @@ h + geom_histogram(aes(fill = as.character(plotStage$is_duplicate)),
 ```
 
 
-Investigating question ID duplicates
+### Fit Some Models
 
-```{r}
-# question1 ids that appear most frequently
-head(sort(table(train$qid1), decreasing = T))
-```
-
-```{r}
-head(train[train$qid1==8461,], 10)
-```
-
-## Fit Some Models
-
-Use h2o to fit for boosted models
-```{r}
-h2o.init(nthreads = -1)
-```
-
-Create h2o train dataframe with response and predictors
-```{r}
-gbm_predictors <- c("char_diff","cos_sims","q1_wc","q2_wc")
-
-train$is_duplicate <- as.factor(train$is_duplicate)
-h2o_train1 <- as.h2o(train[c("is_duplicate",gbm_predictors)], 
-                    destination.frame = "")
-```
-
-fit generalized boosted regression predicting binary target
-```{r}
-gbm1 <- h2o.gbm(x = gbm_predictors,
-                y = "is_duplicate",
-                training_frame = h2o_train1,
-                distribution = "bernoulli",
-                model_id = "gbm1",
-                ntrees = 100,
-                learn_rate = 0.01,
-                max_depth = 10,
-                stopping_metric = "logloss",
-                stopping_tolerance = 0,
-                seed = 321)
-```
-
-Model summary
-```{r}
-gbm1
-```
-
-### Prepare test data set for modeling
+#### Prepare test data set for modeling
 ```{r}
 test <- read.csv("test.csv", stringsAsFactors = F)
 
@@ -239,5 +201,47 @@ t1 <- Sys.time()
 test$cos_sims <- cosine_similarity(test$question1, test$question2)
 t2 <- Sys.time()
 t2-t1
+```
+
+#### Boosted trees for classification
+Using *caret* package's extreme gradient (XG) Boosted trees method. 
+
+  + [XG boosted trees introduction](http://xgboost.readthedocs.io/en/latest/model.html)
+  + [Tuning parameters](http://xgboost.readthedocs.io/en/latest//parameter.html)
+  + [*caret* train() models](https://topepo.github.io/caret/train-models-by-tag.html)
+
+Fit boosted trees predicting binary target
+```{r}
+bt_df1 <- train[c("is_duplicate","char_diff","cos_sims","q1_wc","q2_wc")]
+
+set.seed(1) 
+
+# tuning parameters
+gbmGrid <- expand.grid(
+  nrounds = 10, # number of boosting iterations
+  max_depth = 1000, # max tree depth 
+  eta = 0.3, # shrinkage / learning rate
+  gamma = 0, # minimum loss function
+  colsample_bytree = 1, # subsample of ratio of columns
+  min_child_weight=1, # minimum sum of instance weight
+  subsample = 0.5 # subsample shrinkage
+  )
+
+gbmTree1 <- train(id_duplicate ~ ., 
+                 data = bt_df1,
+                 method = "xgbTree",
+                 trControl = fitControl,
+                 verbose = FALSE,
+                 tuneGrid = gbmGrid)
+```
+
+Model summary
+```{r}
+gbmTree1
+```
+
+Predict testing data
+```{r}
+gbt1_preds <- predict(gbmTree1 , newdata = test, type = "prob")
 ```
 
