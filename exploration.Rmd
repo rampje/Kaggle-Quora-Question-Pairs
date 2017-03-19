@@ -6,14 +6,16 @@ output: html_notebook
 This is an R Markdown notebook containing exploratory data analysis (EDA), text mining, and modeling for Kaggle's [Quora Question Pairs](https://www.kaggle.com/c/quora-question-pairs) competition. The goal is to build a model that can accurately classify whether  questions are duplicates. Updated source code available on [Github](https://github.com/rampje/Kaggle-Quora-Question-Pairs/blob/master/exploration.Rmd)
 
 ```{r}
-# Load packages and read the training data into R
 library(plyr)
 library(tidyverse)
 library(purrr)
 library(tm)
 library(lsa)
 library(caret)
+```
 
+```{r}
+# Load packages and read the training data into R
 train <- read.csv("train.csv", stringsAsFactors = F)
 ```
 
@@ -80,7 +82,7 @@ h + geom_histogram(aes(fill = as.character(plotStage$is_duplicate)),
 
 ## Calculating cosine similarities   
 
-This blog [post](http://blog.christianperone.com/2011/09/machine-learning-text-feature-extraction-tf-idf-part-i/) provides an introduction to [**term frequency-inverse document frequency** (**tf-idf**)](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) and the [**Vector Space Model** (**VSM**)](https://en.wikipedia.org/wiki/Vector_space_model). These concepts provide the mathematical foundations which motivate using cosine similarity to determine whether texts are the same.
+This blog [**post**](http://blog.christianperone.com/2011/09/machine-learning-text-feature-extraction-tf-idf-part-i/) provides an introduction to the [**Vector Space Model** (**VSM**)](https://en.wikipedia.org/wiki/Vector_space_model) and [**term frequency-inverse document frequency** (**tf-idf**)](https://en.wikipedia.org/wiki/Tf%E2%80%93idf). These concepts provide the mathematical foundations which motivate the usage of cosine similarity to determine whether texts are the same.
 
 #### Definition of cosine similarity  
 
@@ -147,7 +149,7 @@ head(cos_sims, 20)
 Distribution of question pairs' cosine similarities 
 ```{r}
 train$cos_sims <- cos_sims
-h <- ggplot(data=train, aes(x=cos.sims))
+h <- ggplot(data=train, aes(x=cos_sims))
 h + geom_histogram(aes(fill = as.character(train$is_duplicate)),
                    binwidth = 0.01, colour = "black")
 ```
@@ -200,10 +202,15 @@ May have to figure out a faster way to implement this...
 
 ```{r}
 t1 <- Sys.time()
-test$cos_sims <- cosine_similarity(test$question1, test$question2)
+test_cos_sims <- cosine_similarity(test$question1, test$question2)
 t2 <- Sys.time()
 t2-t1
 ```
+
+```{r}
+test$cos_sims <- test_cos_sims
+```
+
 
 #### Boosted trees for classification
 Using *caret* package's extreme gradient (XG) Boosted trees method. 
@@ -230,14 +237,15 @@ gbmGrid <- expand.grid(
   subsample = 0.5 # subsample shrinkage
   )
 
-gbmTree1 <- train(id_duplicate ~ ., 
+gbmTree1 <- train(is_duplicate ~ ., 
                  data = bt_df1,
                  method = "xgbTree",
-                 trControl = fitControl,
+                # trControl = fitControl,
                  verbose = FALSE,
+                 na.action = na.omit,
                  tuneGrid = gbmGrid)
 ```
-
+2:19
 Model summary
 ```{r}
 gbmTree1
@@ -245,6 +253,20 @@ gbmTree1
 
 Predict testing data
 ```{r}
-gbt1_preds <- predict(gbmTree1 , newdata = test, type = "prob")
+gbt1_preds <- predict(gbmTree1 , newdata = na.omit(test), type = "prob")
+gbt1_preds$test_id <- na.omit(test)$test_id
+head(gbt1_preds)
+```
+
+Prepare submission format
+
+```{r}
+submission1 <- gbt1_preds[c("test_id","1")]
+names(submission1)[2] <- "is_duplicate"
+head(submission1)
+```
+
+```{r}
+write.csv(submission1, "submission1.csv", row.names = FALSE)
 ```
 
